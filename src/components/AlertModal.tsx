@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Bell, CheckCircle2, Loader2, X } from 'lucide-react';
 import type { InvestigationResult } from '@/lib/analysis/types';
+import { dispatchAlertNotification } from '@/lib/client/sentinelClient';
 import {
   OBSIDIAN_INPUT,
   OBSIDIAN_SUB_SURFACE,
@@ -36,24 +37,19 @@ export default function AlertModal({
     setResponse(null);
 
     try {
-      const res = await fetch('/api/alerts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          periodLabel: investigation?.targetPeriodLabel || 'Selected Period',
-          anomalyType: anomaly?.type || 'SUSTAINED_DECLINE',
-          severity: anomaly?.severity || 'MEDIUM',
-          scoreDrop: anomaly?.scoreDrop ?? 0.35,
-          negativeShareSurge: anomaly?.negativeShareIncreasePts ?? 22.0,
-          topTopicDelta: topDelta
-            ? `${topDelta.topic} ${topDelta.deltaPercentagePoints >= 0 ? '+' : ''}${topDelta.deltaPercentagePoints} pts`
-            : 'Software/Updates',
-          sampleEvidenceText: topEvidence || 'Customer complaints observed.',
-          webhookUrl: webhookUrl.trim() || undefined,
-          isTest: !anomaly,
-        }),
+      const json = await dispatchAlertNotification({
+        periodLabel: investigation?.targetPeriodLabel || 'Selected Period',
+        anomalyType: anomaly?.type || 'SUSTAINED_DECLINE',
+        severity: anomaly?.severity || 'MEDIUM',
+        scoreDrop: anomaly?.scoreDrop ?? 0.35,
+        negativeShareSurge: anomaly?.negativeShareIncreasePts ?? 22.0,
+        topTopicDelta: topDelta
+          ? `${topDelta.topic} ${topDelta.deltaPercentagePoints >= 0 ? '+' : ''}${topDelta.deltaPercentagePoints} pts`
+          : 'Software/Updates',
+        sampleEvidenceText: topEvidence || 'Customer complaints observed.',
+        webhookUrl: webhookUrl.trim() || undefined,
+        isTest: !anomaly,
       });
-      const json = (await res.json()) as { success: boolean; message: string };
       setResponse(json);
     } catch (err: unknown) {
       setResponse({

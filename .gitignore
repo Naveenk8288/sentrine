@@ -17,8 +17,9 @@
 /.next/
 /out/
 
-# production
+# build / backup
 /build
+/.pages-api-backup
 
 # misc
 .DS_Store

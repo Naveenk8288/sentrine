@@ -21,6 +21,11 @@ import type {
   FeedbackReview,
   InvestigationResult,
 } from '@/lib/analysis/types';
+import {
+  fetchInvestigationData,
+  fetchTrendsData,
+  resetDatasetOnServer,
+} from '@/lib/client/sentinelClient';
 import AlertModal from './AlertModal';
 import AskPanel from './AskPanel';
 import InvestigationPanel from './InvestigationPanel';
@@ -34,7 +39,6 @@ import {
 import TrendCharts from './TrendCharts';
 import type {
   GranularityMode,
-  InvestigateApiResponse,
   TrendsApiResponse,
 } from './types';
 import UploadModal from './UploadModal';
@@ -85,42 +89,15 @@ export default function SentinelDashboard() {
       setTrendsError(null);
 
       try {
-        let res: Response;
-        if (customReviews) {
-          res = await fetch('/api/trends', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reviews: customReviews,
-              filters: {
-                period,
-                categories: selectedCategories.length ? selectedCategories : undefined,
-                products: selectedProducts.length ? selectedProducts : undefined,
-                startDate: startDate || undefined,
-                endDate: endDate || undefined,
-                minVolumeThreshold,
-              },
-            }),
-          });
-        } else {
-          const params = new URLSearchParams();
-          params.set('period', period);
-          params.set('minVolumeThreshold', String(minVolumeThreshold));
-          if (selectedCategories.length > 0) {
-            params.set('categories', selectedCategories.join(','));
-          }
-          if (selectedProducts.length > 0) {
-            params.set('products', selectedProducts.join(','));
-          }
-          if (startDate) params.set('startDate', startDate);
-          if (endDate) params.set('endDate', endDate);
-          res = await fetch(`/api/trends?${params.toString()}`);
-        }
-
-        const json = (await res.json()) as TrendsApiResponse;
-        if (!res.ok || !json.success) {
-          throw new Error(json.error || 'Failed to load sentiment trends');
-        }
+        const json = await fetchTrendsData({
+          customReviews,
+          period,
+          categories: selectedCategories,
+          products: selectedProducts,
+          startDate,
+          endDate,
+          minVolumeThreshold,
+        });
         if (cancelled) return;
 
         setTrends(json);
@@ -183,45 +160,17 @@ export default function SentinelDashboard() {
       setInvestigationError(null);
 
       try {
-        let res: Response;
-        if (customReviews) {
-          res = await fetch('/api/investigate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              periodKey: selectedPeriodKey,
-              reviews: customReviews,
-              filters: {
-                period,
-                categories: selectedCategories.length ? selectedCategories : undefined,
-                products: selectedProducts.length ? selectedProducts : undefined,
-                startDate: startDate || undefined,
-                endDate: endDate || undefined,
-                minVolumeThreshold,
-              },
-            }),
-          });
-        } else {
-          const params = new URLSearchParams();
-          params.set('periodKey', selectedPeriodKey);
-          params.set('period', period);
-          params.set('minVolumeThreshold', String(minVolumeThreshold));
-          if (selectedCategories.length > 0) {
-            params.set('categories', selectedCategories.join(','));
-          }
-          if (selectedProducts.length > 0) {
-            params.set('products', selectedProducts.join(','));
-          }
-          if (startDate) params.set('startDate', startDate);
-          if (endDate) params.set('endDate', endDate);
-          res = await fetch(`/api/investigate?${params.toString()}`);
-        }
-
-        const json = (await res.json()) as InvestigateApiResponse;
-        if (!res.ok || !json.success || !json.data) {
-          throw new Error(json.error || 'Failed to investigate period');
-        }
-        if (!cancelled) {
+        const json = await fetchInvestigationData({
+          periodKey: selectedPeriodKey,
+          customReviews,
+          period,
+          categories: selectedCategories,
+          products: selectedProducts,
+          startDate,
+          endDate,
+          minVolumeThreshold,
+        });
+        if (!cancelled && json.data) {
           setInvestigation(json.data);
         }
       } catch (err: unknown) {
@@ -273,11 +222,7 @@ export default function SentinelDashboard() {
   }, []);
 
   const handleResetDataset = async () => {
-    try {
-      await fetch('/api/upload', { method: 'DELETE' });
-    } catch {
-      // Safe to proceed with client reset
-    }
+    await resetDatasetOnServer();
     setCustomReviews(null);
     setDatasetLabel('Demo Feedback (12 Weeks)');
     setSelectedPeriodKey(null);

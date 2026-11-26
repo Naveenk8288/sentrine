@@ -1,3 +1,7 @@
+import {
+  buildOfflineQueryResponse,
+  generateExtractiveFallback,
+} from '../analysis/engine';
 import { DistinctiveTerm, FeedbackReview, TopicDelta } from '../analysis/types';
 
 export interface GroundedCauseResult {
@@ -6,73 +10,6 @@ export interface GroundedCauseResult {
   citations: string[];
   eventDetectiveHypothesis?: string;
   isOfflineFallback: boolean;
-}
-
-/**
- * Deterministic extractive fallback synthesis if Gemini API key is missing or call fails.
- * Guarantees zero downtime and complete offline demo capability.
- */
-function generateExtractiveFallback(
-  targetReviews: FeedbackReview[],
-  topicDeltas: TopicDelta[],
-  distinctiveTerms: DistinctiveTerm[]
-): GroundedCauseResult {
-  const surgeTopic = topicDeltas.find((d) => d.isSurge) || topicDeltas[0];
-  const topTerms = distinctiveTerms.slice(0, 4).map((t) => `"${t.term}"`);
-  
-  // Find reviews mentioning distinctive terms
-  const citedReviews: string[] = [];
-  for (const r of targetReviews) {
-    if (r.sentimentLabel === 'Negative') {
-      const textLower = r.reviewText.toLowerCase();
-      const hasTerm = distinctiveTerms.some((t) => textLower.includes(t.term.toLowerCase()));
-      if (hasTerm && citedReviews.length < 5) {
-        citedReviews.push(r.id);
-      }
-    }
-  }
-
-  // Fallback to any negative reviews if none matched terms
-  if (citedReviews.length === 0) {
-    targetReviews
-      .filter((r) => r.sentimentLabel === 'Negative')
-      .slice(0, 3)
-      .forEach((r) => citedReviews.push(r.id));
-  }
-
-  let likelyCause = '';
-  let eventDetectiveHypothesis = '';
-
-  if (surgeTopic && topTerms.length > 0) {
-    likelyCause = `Customer sentiment plummeted primarily due to a surge in ${surgeTopic.topic} complaints (+${surgeTopic.deltaPercentagePoints} pts vs baseline). Customers frequently cited ${topTerms.join(', ')} as critical pain points, leading to a cluster of 1-star ratings and severe dissatisfaction.`;
-  } else if (surgeTopic) {
-    likelyCause = `Sentiment dropped markedly driven by an increase in ${surgeTopic.topic} feedback (+${surgeTopic.deltaPercentagePoints} pts vs baseline).`;
-  } else {
-    likelyCause = `Customer feedback indicates localized negative experiences concentrated on product reliability and service response.`;
-  }
-
-  // Event Detective trigger logic
-  const isFirmware = distinctiveTerms.some((t) => /firmware|update|v3\.2|patch/i.test(t.term));
-  const isDelivery = distinctiveTerms.some((t) => /delivery|courier|delay|shipping|tracking/i.test(t.term));
-
-  if (isFirmware) {
-    const termStat = distinctiveTerms.find((t) => /update|firmware/i.test(t.term));
-    const targetFreq = termStat ? termStat.targetFrequency : 48;
-    const baseFreq = termStat ? termStat.baselineFrequency : 3;
-    eventDetectiveHypothesis = `Likely trigger: Firmware update v3.2 rollout. The terms "update" and "firmware" appear in ${targetFreq}% of complaints during this period vs ${baseFreq}% in the 4-week baseline, strongly indicating a regression bug causing battery drain and connection loss.`;
-  } else if (isDelivery) {
-    eventDetectiveHypothesis = `Likely trigger: Regional logistics / courier bottleneck. Mentions of courier delays and shipment backlog increased significantly (+38 pts) vs baseline.`;
-  } else {
-    eventDetectiveHypothesis = `Likely trigger: Concentrated customer dissatisfaction spike in ${surgeTopic?.topic || 'product quality'}.`;
-  }
-
-  return {
-    likelyCause,
-    confidence: citedReviews.length >= 3 ? 'HIGH' : 'MEDIUM',
-    citations: citedReviews,
-    eventDetectiveHypothesis,
-    isOfflineFallback: true,
-  };
 }
 
 /**
@@ -161,73 +98,6 @@ Respond with STRICT JSON format:
     console.error('Failed to call Gemini API, using offline fallback:', err);
     return generateExtractiveFallback(targetReviews, topicDeltas, distinctiveTerms);
   }
-}
-
-function buildOfflineQueryResponse(
-  query: string,
-  relevantReviews: FeedbackReview[]
-): {
-  answer: string;
-  citations: string[];
-  isOfflineFallback: boolean;
-} {
-  if (relevantReviews.length === 0) {
-    return {
-      answer: 'No reviews matched this question in the active dataset.',
-      citations: [],
-      isOfflineFallback: true,
-    };
-  }
-
-  const negOrMixed = relevantReviews.filter(
-    (r) => r.sentimentLabel === 'Negative' || r.sentimentLabel === 'Mixed'
-  );
-  const samplePool = negOrMixed.length > 0 ? negOrMixed : relevantReviews;
-
-  const topicCounts = new Map<string, number>();
-  const productCounts = new Map<string, number>();
-  for (const r of samplePool) {
-    topicCounts.set(r.topic, (topicCounts.get(r.topic) || 0) + 1);
-    productCounts.set(r.product, (productCounts.get(r.product) || 0) + 1);
-  }
-
-  const topTopics = Array.from(topicCounts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 2)
-    .map(([topic, count]) => `${topic} (${count})`);
-  const topProduct = Array.from(productCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
-
-  // Prioritize reviews matching query terms if possible
-  const queryTerms = query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 3);
-  const ranked = [...samplePool].sort((a, b) => {
-    const aHits = queryTerms.filter((t) => a.reviewText.toLowerCase().includes(t)).length;
-    const bHits = queryTerms.filter((t) => b.reviewText.toLowerCase().includes(t)).length;
-    if (bHits !== aHits) return bHits - aHits;
-    return a.compoundScore - b.compoundScore;
-  });
-
-  const topCited = ranked.slice(0, 4);
-  const citations = topCited.map((r) => r.id);
-  const quotes = topCited
-    .slice(0, 2)
-    .map((r) => `"${r.reviewText}" [${r.id}]`)
-    .join(' and ');
-
-  const sentimentSummary =
-    negOrMixed.length > 0
-      ? `${negOrMixed.length} negative/mixed reviews (out of ${relevantReviews.length} matched)`
-      : `${relevantReviews.length} matching reviews`;
-
-  const answer = `Analysis of ${sentimentSummary}${topProduct ? ` centered on ${topProduct}` : ''} shows feedback concentrated around ${topTopics.join(' and ') || 'product reliability'}. Key customer reports include ${quotes}.`;
-
-  return {
-    answer,
-    citations,
-    isOfflineFallback: true,
-  };
 }
 
 /**

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buildUploadSuccessPayload, parseAndAnalyzeCSV } from '@/lib/analysis/engine';
 import { getErrorMessage } from '@/lib/analysis/types';
-import { parseAndAnalyzeCSV, resetStoreToDemo, setStoreReviews } from '@/lib/db/store';
+import { resetStoreToDemo, setStoreReviews } from '@/lib/db/store';
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,34 +29,16 @@ export async function POST(req: NextRequest) {
     if (reviews.length === 0) {
       return NextResponse.json(
         {
-          error: 'No valid feedback records found in CSV. Please verify required columns (date, review_text).',
+          error:
+            'No valid feedback records found in CSV. Please verify required columns (date, review_text).',
           validationSummary,
         },
         { status: 422 }
       );
     }
 
-    // Update in-memory store
     setStoreReviews(reviews);
-
-    // Extract unique categories and products
-    const categories = Array.from(new Set(reviews.map((r) => r.category))).sort();
-    const products = Array.from(new Set(reviews.map((r) => r.product))).sort();
-
-    return NextResponse.json({
-      success: true,
-      message: `Successfully analyzed ${reviews.length} reviews`,
-      validationSummary,
-      preview: reviews.slice(0, 5),
-      reviews,
-      metadata: {
-        totalReviews: reviews.length,
-        categories,
-        products,
-        dateMin: reviews.reduce((min, r) => (r.date < min ? r.date : min), reviews[0].date),
-        dateMax: reviews.reduce((max, r) => (r.date > max ? r.date : max), reviews[0].date),
-      },
-    });
+    return NextResponse.json(buildUploadSuccessPayload(reviews, validationSummary));
   } catch (err: unknown) {
     console.error('Error in /api/upload:', err);
     return NextResponse.json(

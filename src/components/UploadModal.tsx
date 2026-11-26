@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import type { FeedbackReview } from '@/lib/analysis/types';
+import { processCsvUpload } from '@/lib/client/sentinelClient';
 import { OBSIDIAN_INPUT, ViewfinderBrackets } from './ObsidianPrimitives';
 import type { UploadApiResponse } from './types';
 
@@ -45,34 +46,24 @@ export default function UploadModal({
     setSummary(null);
 
     try {
-      let res: Response;
       let label = 'Custom CSV';
+      let json: UploadApiResponse;
 
       if (mode === 'file') {
         if (!selectedFile) {
           throw new Error('Please choose a CSV file first.');
         }
         label = selectedFile.name;
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        res = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
+        json = await processCsvUpload({ file: selectedFile });
       } else {
         if (!csvText.trim()) {
           throw new Error('Please paste CSV rows first.');
         }
         label = 'Pasted CSV Dataset';
-        res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ csvText }),
-        });
+        json = await processCsvUpload({ csvText });
       }
 
-      const json = (await res.json()) as UploadApiResponse;
-      if (!res.ok || !json.success || !json.reviews) {
+      if (!json.reviews) {
         throw new Error(json.error || 'CSV processing failed');
       }
 

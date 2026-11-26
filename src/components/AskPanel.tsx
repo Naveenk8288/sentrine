@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Loader2, Send, Sparkles } from 'lucide-react';
 import type { FeedbackReview } from '@/lib/analysis/types';
+import { askSentinelQuestion } from '@/lib/client/sentinelClient';
 import {
   OBSIDIAN_INPUT,
   OBSIDIAN_SUB_SURFACE,
@@ -35,18 +36,7 @@ export default function AskPanel({ customReviews }: AskPanelProps) {
     setError(null);
 
     try {
-      const res = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: trimmed,
-          ...(customReviews ? { reviews: customReviews } : {}),
-        }),
-      });
-      const json = (await res.json()) as AskApiResponse;
-      if (!res.ok || !json.success) {
-        throw new Error(json.error || 'Failed to answer question');
-      }
+      const json = await askSentinelQuestion(trimmed, customReviews);
       setResult(json);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Unable to process question');
